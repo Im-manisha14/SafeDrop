@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck, UploadCloud, FileText, Link2, Trash2, LogOut, LockKeyhole, Clock3, Activity, Copy, CheckCircle2, AlertCircle } from 'lucide-react';
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const apiUrl = (path) => {
+  if (!path) return API_BASE || '/';
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+};
+
 const request = async (path, options = {}, token = '') => {
   const headers = { ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(apiUrl(path), { ...options, headers });
   const type = response.headers.get('content-type') || '';
   if (!response.ok) { const data = type.includes('json') ? await response.json() : {}; throw new Error(data.error || `Request failed (${response.status})`); }
   return type.includes('json') ? response.json() : response;
