@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-safedrop}
+      POSTGRES_USER: ${POSTGRES_USER:-safedrop_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_only_change_me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-safedrop_user} -d ${POSTGRES_DB:-safedrop}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://safedrop_user:local_only_change_me@db:5432/safedrop}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-jwt-secret-change-before-use}
+      SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET:-local-development-share-secret-change-before-use}
+      UPLOAD_FOLDER: ${UPLOAD_FOLDER:-/app/uploads}
+      MAX_CONTENT_LENGTH: ${MAX_CONTENT_LENGTH:-10485760}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      FLASK_DEBUG: ${FLASK_DEBUG:-0}
+    volumes:
+      - uploaded_files:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres_data:
+  uploaded_files:
