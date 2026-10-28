@@ -1,10 +1,12 @@
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import bcrypt
 from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
 from sqlalchemy.exc import IntegrityError
-from werkzeug.security import generate_password_hash, check_password_hash
+
 from .extensions import db
 from .models import User, StoredFile, ShareLink, AuditEvent
 from .security import clean_filename, new_share_token, hash_token, is_expired
@@ -27,6 +29,17 @@ def current_user_id():
         return None
 
 
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def verify_password(password_hash: str, password: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        return False
+
+
 @api.post("/auth/register")
 def register():
     data = request.get_json(silent=True) or {}
@@ -36,7 +49,7 @@ def register():
         return error("Enter a valid email address.", 400)
     if not isinstance(password, str) or len(password) < 10 or len(password) > 128:
         return error("Password must be 10–128 characters.", 400)
-    user = User(email=email, password_hash=generate_password_hash(password, method="scrypt"))
+    user = User(email=email, password_hash=hash_password(password))
     db.session.add(user)
     try:
         db.session.commit()
@@ -54,12 +67,31 @@ def login():
     email = str(data.get("email", "")).strip().lower()
     password = data.get("password", "")
     user = User.query.filter_by(email=email).first()
-    if not user or not isinstance(password, str) or not check_password_hash(user.password_hash, password):
+    if not user or not isinstance(password, str) or not verify_password(user.password_hash, password):
         return error("Invalid email or password.", 401)
     token = create_access_token(identity=str(user.id))
     audit("login", user.id, detail="Successful login")
     db.session.commit()
     return jsonify({"access_token": token, "user": {"id": user.id, "email": user.email}})
+
+
+@api.get("/auth/me")
+@jwt_required()
+def current_user():
+    uid = current_user_id()
+    user = User.query.get(uid)
+    if not user:
+        return error("User not found.", 404)
+    return jsonify({"user": {"id": user.id, "email": user.email}})
+
+
+@api.post("/auth/logout")
+@jwt_required()
+def logout():
+    uid = current_user_id()
+    audit("logout", uid, detail="User logged out")
+    db.session.commit()
+    return jsonify({"message": "Logged out successfully."})
 
 
 @api.get("/files")
@@ -68,6 +100,31 @@ def list_files():
     uid = current_user_id()
     files = StoredFile.query.filter_by(owner_id=uid).order_by(StoredFile.created_at.desc()).all()
     return jsonify({"files": [file_json(f) for f in files]})
+
+
+@api.get("/files/<int:file_id>")
+@jwt_required()
+def get_file(file_id):
+    uid = current_user_id()
+    record = StoredFile.query.filter_by(id=file_id, owner_id=uid).first()
+    if not record:
+        return error("File not found.", 404)
+    return jsonify({"file": file_json(record)})
+
+
+@api.get("/files/<int:file_id>/download")
+@jwt_required()
+def download_file(file_id):
+    uid = current_user_id()
+    record = StoredFile.query.filter_by(id=file_id, owner_id=uid).first()
+    if not record:
+        return error("File not found.", 404)
+    path = Path(current_app.config["UPLOAD_FOLDER"]) / record.storage_name
+    if not path.is_file():
+        return error("File is no longer available.", 404)
+    audit("file_downloaded", uid, record.id, "Downloaded by owner")
+    db.session.commit()
+    return send_file(path, as_attachment=True, download_name=record.original_name, mimetype=record.mime_type or "application/octet-stream", max_age=0)
 
 
 def file_json(f):

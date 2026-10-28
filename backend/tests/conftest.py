@@ -6,7 +6,7 @@ from safedrop.extensions import db
 def app(tmp_path):
     upload_dir = tmp_path / "uploads"
     app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://", "UPLOAD_FOLDER": str(upload_dir),
-                      "JWT_SECRET_KEY": "test-jwt-secret", "FRONTEND_ORIGIN": "http://localhost:8080",
+                      "JWT_SECRET_KEY": "test-jwt-secret-key-should-be-long-enough", "FRONTEND_ORIGIN": "http://localhost:8080",
                       "MAX_CONTENT_LENGTH": 1024 * 1024})
     with app.app_context():
         db.drop_all()

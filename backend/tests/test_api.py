@@ -14,12 +14,18 @@ def test_upload_list_and_share_download(client, auth_header):
     assert upload.status_code == 201
     file_id = upload.json["file"]["id"]
     assert len(client.get("/api/files", headers=auth_header).json["files"]) == 1
+
+    private_download = client.get(f"/api/files/{file_id}/download", headers=auth_header)
+    assert private_download.status_code == 200
+    assert private_download.data == b"hello safe world"
+
     share = client.post(f"/api/files/{file_id}/shares", headers=auth_header, json={"expires_in_hours": 1})
     assert share.status_code == 201
     token = share.json["url"].rsplit("/", 1)[-1]
     downloaded = client.get(f"/api/share/{token}")
     assert downloaded.status_code == 200
     assert downloaded.data == b"hello safe world"
+    assert client.get("/api/share/not-a-valid-token").status_code == 404
 
 def test_unsupported_extension_rejected(client, auth_header):
     response = client.post("/api/files", headers=auth_header, data={"file": (BytesIO(b"x"), "script.exe")}, content_type="multipart/form-data")
